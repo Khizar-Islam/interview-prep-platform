@@ -1,0 +1,25 @@
+{
+  "name": "interview-prep-backend",
+  "version": "1.0.0",
+  "description": "Backend API for AI Interview Prep Platform",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "nodemon src/index.js",
+    "start": "node src/index.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev --name init",
+    "prisma:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.20.0",
+    "express": "^4.21.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "@google/genai": "^1.0.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.20.0",
+    "nodemon": "^3.1.7"
+  }
+}

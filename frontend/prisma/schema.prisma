@@ -1,0 +1,124 @@
+// This file defines your database structure.
+// Every "model" below becomes a real table in PostgreSQL once we run the migrate command.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  name          String?
+  avatarUrl     String?
+  // Added for NextAuth (Auth.js): tracks whether the email was verified
+  // and stores the profile picture from Google sign-in.
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+
+  interviewSessions InterviewSession[]
+
+  // Added for NextAuth: links Google login info and active login sessions
+  // to this user. NextAuth requires these exact model names (Account, Session).
+  accounts Account[]
+  sessions Session[]
+
+  @@map("users")
+}
+
+// Renamed from "Session" to "InterviewSession" so it doesn't collide with
+// NextAuth's own "Session" model (a login session, defined below).
+// The underlying table name stays "sessions" via @@map, so no existing data is lost.
+model InterviewSession {
+  id               String     @id @default(uuid())
+  userId           String
+  user             User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role             String
+  experienceLevel  String
+  status           String     @default("in_progress")
+  overallScore     Float?
+  createdAt        DateTime   @default(now())
+  completedAt      DateTime?
+  questions        Question[]
+
+  @@map("sessions")
+}
+
+model Question {
+  id             String            @id @default(uuid())
+  sessionId      String
+  session        InterviewSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  questionText   String
+  questionOrder  Int
+  category       String
+  createdAt      DateTime          @default(now())
+  answer         Answer?
+
+  @@map("questions")
+}
+
+model Answer {
+  id              String   @id @default(uuid())
+  questionId      String   @unique
+  question        Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  answerText      String?
+  aiFeedback      String?
+  clarityScore    Float?
+  structureScore  Float?
+  contentScore    Float?
+  createdAt       DateTime @default(now())
+
+  @@map("answers")
+}
+
+// --- Everything below is required by NextAuth (Auth.js) with the Prisma adapter ---
+// IMPORTANT: NextAuth's adapter hardcodes these exact model names (Account, Session,
+// VerificationToken) internally — they cannot be renamed via config. Table names
+// (via @@map) can still be whatever we want, which is how we avoid clashing with
+// the existing "sessions" table used by InterviewSession above.
+
+model Account {
+  id                String  @id @default(uuid())
+  userId            String
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+// This is NextAuth's own concept of "a real, active login" — unrelated to your
+// InterviewSession model above. Mapped to a differently-named table
+// ("auth_sessions") to avoid clashing with the existing "sessions" table.
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expires      DateTime
+
+  @@map("auth_sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}

@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+# Environment variables (contains real secrets - never commit this)
+.env
+.env.local
+.env.*.local
+
+# Logs
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
