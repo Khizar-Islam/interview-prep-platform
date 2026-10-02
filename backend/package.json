@@ -12,14 +12,15 @@
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
+    "@google/genai": "^1.0.0",
     "@prisma/client": "^5.20.0",
-    "express": "^4.21.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "@google/genai": "^1.0.0"
+    "express": "^4.21.0",
+    "express-rate-limit": "^8.6.2"
   },
   "devDependencies": {
-    "prisma": "^5.20.0",
-    "nodemon": "^3.1.7"
+    "nodemon": "^3.1.7",
+    "prisma": "^5.20.0"
   }
 }

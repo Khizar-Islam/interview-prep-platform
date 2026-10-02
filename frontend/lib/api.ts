@@ -27,15 +27,27 @@ type CreateSessionResponse = {
 
 /**
  * Creates a new interview session and triggers AI question generation.
- * Automatically retries once if the database was asleep (Neon's free tier
- * suspends after inactivity, and the very first request after that can fail
- * before the database finishes waking up).
+ *
+ * Two separate "cold start" scenarios can happen on the free tiers:
+ * 1. Neon's Postgres database auto-suspends after ~5 min idle — the request
+ *    fails almost immediately with a connection error, and a short 2.5s
+ *    retry is enough to recover from this.
+ * 2. Render's backend service itself auto-suspends after ~15 min idle — the
+ *    request doesn't fail, it just takes up to ~50 seconds to respond while
+ *    Render boots the server back up. This isn't an error to retry, it's
+ *    just a slow (but successful) request — so instead we show a live
+ *    "waking up" counter via onWakingUp while we wait for it.
+ *
+ * onWakingUp fires every 3 seconds, starting at 3, with the number of
+ * seconds elapsed so far — e.g. 3, 6, 9, 12... If the request finishes
+ * before the first 3-second mark (the normal, warm case), onWakingUp never
+ * fires at all, so most users never see this UI.
  */
 export async function createSession(
   userId: string,
   role: string,
   experienceLevel: string,
-  onRetry?: () => void
+  onWakingUp?: (elapsedSeconds: number) => void
 ): Promise<CreateSessionResponse> {
   async function attempt(): Promise<CreateSessionResponse> {
     const res = await fetch(`${API_BASE_URL}/api/sessions`, {
@@ -46,11 +58,20 @@ export async function createSession(
 
     if (!res.ok) {
       const errorBody = await res.json().catch(() => null);
-      throw new Error(errorBody?.message || "Failed to create session.");
+      throw new Error(
+        errorBody?.message ||
+          "Couldn't start your session. Please try again in a moment."
+      );
     }
 
     return res.json();
   }
+
+  let elapsed = 0;
+  const tickInterval = setInterval(() => {
+    elapsed += 3;
+    onWakingUp?.(elapsed);
+  }, 3000);
 
   try {
     return await attempt();
@@ -60,12 +81,13 @@ export async function createSession(
       message.includes("Can't reach database") || message.includes("connect");
 
     if (looksLikeColdStart) {
-      onRetry?.(); // let the UI show "waking up the database..."
       await new Promise((resolve) => setTimeout(resolve, 2500));
-      return attempt(); // one retry, then let any error bubble up normally
+      return await attempt(); // one retry, then let any error bubble up normally
     }
 
     throw err;
+  } finally {
+    clearInterval(tickInterval);
   }
 }
 
@@ -77,7 +99,10 @@ export async function getSession(sessionId: string): Promise<{ session: Session 
 
   if (!res.ok) {
     const errorBody = await res.json().catch(() => null);
-    throw new Error(errorBody?.message || "Failed to load session.");
+    throw new Error(
+      errorBody?.message ||
+        "Couldn't load this session. Please try again."
+    );
   }
 
   return res.json();
@@ -94,10 +119,31 @@ export async function getUserSessions(userId: string): Promise<{ sessions: Sessi
 
   if (!res.ok) {
     const errorBody = await res.json().catch(() => null);
-    throw new Error(errorBody?.message || "Failed to load sessions.");
+    throw new Error(
+      errorBody?.message ||
+        "Couldn't load your sessions. Please try again."
+    );
   }
 
   return res.json();
+}
+/**
+ * Permanently deletes a session and all its questions/answers (cascades on
+ * the backend via Prisma's onDelete: Cascade). Used by the delete button on
+ * the dashboard.
+ */
+
+export async function deleteSession(sessionId: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}`, {
+    method: "DELETE",
+  });
+
+  if (!res.ok) {
+    const errorBody = await res.json().catch(() => null);
+    throw new Error(
+      errorBody?.message || "Couldn't delete this session. Please try again."
+    );
+  }
 }
 
 /**
@@ -123,6 +169,11 @@ export async function completeSession(
  * Submits an answer and streams the AI feedback back chunk by chunk.
  * onChunk fires every time a new piece of text arrives (for the typewriter effect).
  * Returns the full feedback text once streaming is complete.
+ *
+ * IMPORTANT: if the backend sends an { error: "..." } message mid-stream
+ * (e.g. Gemini failed partway through), that error is thrown here so it
+ * reaches the UI as a real, visible message — it must NOT be silently
+ * swallowed inside the JSON-parsing try/catch below.
  */
 export async function submitAnswerStreaming(
   questionId: string,
@@ -137,7 +188,10 @@ export async function submitAnswerStreaming(
 
   if (!res.ok || !res.body) {
     const errorBody = await res.json().catch(() => null);
-    throw new Error(errorBody?.message || "Failed to submit answer.");
+    throw new Error(
+      errorBody?.message ||
+        "Couldn't submit your answer. Please try again."
+    );
   }
 
   const reader = res.body.getReader();
@@ -159,17 +213,25 @@ export async function submitAnswerStreaming(
       const line = part.replace(/^data: /, "").trim();
       if (!line) continue;
 
+      // Only JSON-parsing failures are swallowed here (shouldn't normally
+      // happen). A successfully-parsed { error: "..." } message is NOT a
+      // parsing failure — it's a real backend error and must be thrown
+      // outside this try block so it isn't silently caught below.
+      let parsed: { chunk?: string; done?: boolean; error?: string } | null = null;
       try {
-        const parsed = JSON.parse(line);
-        if (parsed.chunk) {
-          fullText += parsed.chunk;
-          onChunk(parsed.chunk);
-        }
-        if (parsed.error) {
-          throw new Error(parsed.error);
-        }
+        parsed = JSON.parse(line);
       } catch {
-        // ignore lines that aren't valid JSON (shouldn't normally happen)
+        continue;
+      }
+
+      if (parsed?.error) {
+        throw new Error(
+          "The AI had trouble generating feedback for this answer. Please try submitting again."
+        );
+      }
+      if (parsed?.chunk) {
+        fullText += parsed.chunk;
+        onChunk(parsed.chunk);
       }
     }
   }

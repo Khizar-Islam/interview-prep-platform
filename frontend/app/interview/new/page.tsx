@@ -28,7 +28,7 @@ export default function NewInterviewPage() {
   const [role, setRole] = useState("");
   const [experienceLevel, setExperienceLevel] = useState("junior");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [wakingUp, setWakingUp] = useState(false);
+  const [wakingUpSeconds, setWakingUpSeconds] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -50,7 +50,7 @@ export default function NewInterviewPage() {
         session.user.id,
         role.trim(),
         experienceLevel,
-        () => setWakingUp(true)
+        (elapsedSeconds) => setWakingUpSeconds(elapsedSeconds)
       );
       router.push(`/interview/${newSession.id}`);
     } catch (err) {
@@ -60,7 +60,7 @@ export default function NewInterviewPage() {
           : "Something went wrong. Please try again."
       );
       setIsSubmitting(false);
-      setWakingUp(false);
+      setWakingUpSeconds(null);
     }
   }
 
@@ -183,8 +183,8 @@ export default function NewInterviewPage() {
             disabled={isSubmitting}
             className="w-full rounded-lg bg-accent text-background font-medium px-6 py-3.5 hover:brightness-110 active:scale-[0.98] transition-all disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {wakingUp
-              ? "Waking up the database, one moment..."
+            {wakingUpSeconds !== null
+              ? `Waking up the server... (${wakingUpSeconds}s, can take up to a minute)`
               : isSubmitting
               ? "Generating your questions..."
               : "Start interview"}

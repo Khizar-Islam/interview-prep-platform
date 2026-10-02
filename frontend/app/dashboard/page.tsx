@@ -8,6 +8,23 @@ import SessionHistoryCard from "@/components/SessionHistoryCard";
 
 type LoadState = "loading" | "ready" | "error";
 
+// Placeholder card shown while the real session list is loading.
+// Shaped to roughly match SessionHistoryCard so there's no layout "jump"
+// once the real data replaces it.
+function SessionCardSkeleton() {
+  return (
+    <div className="rounded-lg border border-border-soft bg-surface px-5 py-4 animate-pulse">
+      <div className="flex items-center justify-between">
+        <div className="space-y-2">
+          <div className="h-4 w-40 rounded bg-border-soft" />
+          <div className="h-3 w-24 rounded bg-border-soft" />
+        </div>
+        <div className="h-6 w-12 rounded bg-border-soft" />
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const { data: authSession, status } = useSession();
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -31,6 +48,13 @@ export default function DashboardPage() {
     }
     load();
   }, [status, authSession]);
+
+  // Called by a SessionHistoryCard once it has successfully deleted itself
+  // on the backend — removes that session from local state so the card
+  // disappears from the list without needing to re-fetch everything.
+  function handleSessionDeleted(sessionId: string) {
+    setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+  }
 
   // Still checking login status
   if (status === "loading") {
@@ -86,9 +110,11 @@ export default function DashboardPage() {
         </div>
 
         {loadState === "loading" && (
-          <p className="font-mono text-sm text-muted animate-pulse">
-            Loading your sessions...
-          </p>
+          <div className="space-y-3">
+            <SessionCardSkeleton />
+            <SessionCardSkeleton />
+            <SessionCardSkeleton />
+          </div>
         )}
 
         {loadState === "error" && (
@@ -116,6 +142,7 @@ export default function DashboardPage() {
                 key={session.id}
                 session={session}
                 index={index}
+                onDeleted={handleSessionDeleted}
               />
             ))}
           </div>

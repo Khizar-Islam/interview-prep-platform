@@ -4,10 +4,11 @@
 const express = require('express');
 const router = express.Router();
 const sessionsController = require('../controllers/sessions.controller');
+const { createSessionLimiter } = require('../middleware/rateLimiter');
 
 router.get('/user/:userId', sessionsController.getUserSessions);
 router.get('/:id', sessionsController.getSessionById);
-router.post('/', sessionsController.createSession);
+router.post('/', createSessionLimiter, sessionsController.createSession);
 router.patch('/:id/complete', sessionsController.completeSession);
 router.delete('/:id', sessionsController.deleteSession);
 

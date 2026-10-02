@@ -68,10 +68,16 @@ async function streamFeedback(questionText, answerText, res) {
       res.write(`data: ${JSON.stringify({ chunk: textChunk })}\n\n`);
     }
 
-    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
     res.end();
   } catch (err) {
-    res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+    // Log the real, detailed error server-side (visible in Render's logs)
+    // so we can debug it — but never send raw internal error text to the
+    // browser. The frontend shows its own generic, friendly message
+    // regardless of what we send here; this field is really just a signal
+    // that something went wrong, not user-facing copy.
+    console.error("Gemini streaming error:", err.message);
+    res.write(`data: ${JSON.stringify({ error: "generation_failed" })}\n\n`);
     res.end();
   }
 
