@@ -1,31 +1,41 @@
 // This file handles what happens when a user submits an answer to a question:
-// 1. Save their answer text to the database
-// 2. Ask the AI for feedback, streaming it live to the frontend
-// 3. Once streaming finishes, save the feedback + scores to the database too
+// 1. Confirm the question belongs to the requesting user (via its parent session)
+// 2. Save their answer text to the database
+// 3. Ask the AI for feedback, streaming it live to the frontend
+// 4. Once streaming finishes, save the feedback + scores to the database too
 
 const prisma = require('../config/db');
 const aiService = require('../services/ai.service');
 
 // POST /api/answers
-// Body: { questionId, answerText }
+// Body: { questionId, answerText, userId }
 async function submitAnswer(req, res, next) {
   try {
-    const { questionId, answerText } = req.body;
+    const { questionId, answerText, userId } = req.body;
 
-    if (!questionId || !answerText) {
+    if (!questionId || !answerText || !userId) {
       return res.status(400).json({
         error: true,
-        message: 'questionId and answerText are both required.',
+        message: 'questionId, answerText, and userId are all required.',
       });
     }
 
-    // Look up the question so we have its text to send to the AI
+    // Look up the question AND its parent session, so we have the question's
+    // text for the AI, and the session's real owner for the ownership check.
     const question = await prisma.question.findUnique({
       where: { id: questionId },
+      include: { session: true },
     });
 
     if (!question) {
       return res.status(404).json({ error: true, message: 'Question not found.' });
+    }
+
+    if (question.session.userId !== userId) {
+      return res.status(403).json({
+        error: true,
+        message: 'You do not have access to this question.',
+      });
     }
 
     // Save the answer text immediately (feedback fields stay empty for now)

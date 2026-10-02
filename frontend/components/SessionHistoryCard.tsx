@@ -1,8 +1,7 @@
 "use client";
 
-// Note: this file now uses useState (for the delete-confirmation UI), so it
-// needs the "use client" directive at the top — it wasn't there before
-// because the original version had no interactivity of its own.
+// Note: this file uses useState (for the delete-confirmation UI), so it
+// needs the "use client" directive at the top.
 
 import { useState } from "react";
 import Link from "next/link";
@@ -29,7 +28,10 @@ export default function SessionHistoryCard({
     setDeleteError("");
 
     try {
-      await deleteSession(session.id);
+      // session.userId is already available on the Session object itself —
+      // no need to look up the logged-in user separately here. The backend
+      // will still reject this if it somehow doesn't match the real owner.
+      await deleteSession(session.id, session.userId);
       onDeleted(session.id); // tells the dashboard to remove this card from the list
     } catch (err) {
       setDeleteError(

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useSession, signIn } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
 import { getSession, submitAnswerStreaming, completeSession, Question } from "@/lib/api";
 
@@ -26,6 +27,8 @@ export default function InterviewSessionPage() {
   const router = useRouter();
   const sessionId = params.sessionId as string;
 
+  const { data: authSession, status } = useSession();
+
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [loadError, setLoadError] = useState("");
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -39,11 +42,15 @@ export default function InterviewSessionPage() {
   const [collectedScores, setCollectedScores] = useState<number[]>([]);
   const [isCompleting, setIsCompleting] = useState(false);
 
-  // Load the session and its questions on mount
+  // Load the session and its questions on mount — waits until we actually
+  // know who's logged in, since getSession now requires a userId for the
+  // backend's ownership check.
   useEffect(() => {
+    if (status !== "authenticated" || !authSession?.user?.id) return;
+
     async function load() {
       try {
-        const { session } = await getSession(sessionId);
+        const { session } = await getSession(sessionId, authSession!.user!.id);
         setQuestions(session.questions);
         setRole(session.role);
 
@@ -67,13 +74,13 @@ export default function InterviewSessionPage() {
       }
     }
     load();
-  }, [sessionId]);
+  }, [sessionId, status, authSession]);
 
   const currentQuestion = questions[currentIndex];
   const isLastQuestion = currentIndex === questions.length - 1;
 
   async function handleSubmitAnswer() {
-    if (!answerText.trim() || !currentQuestion) return;
+    if (!answerText.trim() || !currentQuestion || !authSession?.user?.id) return;
 
     setAnswerState("submitting");
     setFeedback("");
@@ -84,6 +91,7 @@ export default function InterviewSessionPage() {
       const fullText = await submitAnswerStreaming(
         currentQuestion.id,
         answerText,
+        authSession.user.id,
         (chunk) => {
           setFeedback((prev) => prev + chunk);
         }
@@ -104,13 +112,13 @@ export default function InterviewSessionPage() {
   }
 
   async function handleNextQuestion() {
-    if (isLastQuestion) {
+    if (isLastQuestion && authSession?.user?.id) {
       setIsCompleting(true);
       const overallAverage =
         collectedScores.length > 0
           ? collectedScores.reduce((a, b) => a + b, 0) / collectedScores.length
           : 0;
-      await completeSession(sessionId, overallAverage);
+      await completeSession(sessionId, overallAverage, authSession.user.id);
     }
     setCurrentIndex((prev) => prev + 1);
     setAnswerText("");
@@ -118,6 +126,39 @@ export default function InterviewSessionPage() {
     setAnswerState("idle");
     setSubmitError("");
     setIsCompleting(false);
+  }
+
+  // --- Still checking login status ---
+  if (status === "loading") {
+    return (
+      <main className="min-h-screen bg-background flex items-center justify-center">
+        <p className="font-mono text-sm text-muted animate-pulse">
+          Loading...
+        </p>
+      </main>
+    );
+  }
+
+  // --- Not logged in — ask them to sign in ---
+  if (status === "unauthenticated") {
+    return (
+      <main className="min-h-screen bg-background flex items-center justify-center px-6 text-center">
+        <div>
+          <span className="font-mono text-xs tracking-widest text-accent uppercase">
+            Sign in required
+          </span>
+          <h1 className="mt-3 font-display text-3xl text-foreground">
+            Sign in to view this session.
+          </h1>
+          <button
+            onClick={() => signIn("google")}
+            className="mt-8 rounded-lg bg-accent text-background font-medium px-6 py-3 hover:brightness-110 transition-all"
+          >
+            Sign in with Google
+          </button>
+        </div>
+      </main>
+    );
   }
 
   // --- Loading state ---

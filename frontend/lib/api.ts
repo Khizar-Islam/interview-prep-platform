@@ -93,15 +93,21 @@ export async function createSession(
 
 /**
  * Fetches a single session including all its questions and any saved answers.
+ * userId is required now so the backend can confirm this session actually
+ * belongs to the requesting user before returning it.
  */
-export async function getSession(sessionId: string): Promise<{ session: Session & { questions: (Question & { answer: { answerText: string; aiFeedback: string | null } | null })[] } }> {
-  const res = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}`);
+export async function getSession(
+  sessionId: string,
+  userId: string
+): Promise<{ session: Session & { questions: (Question & { answer: { answerText: string; aiFeedback: string | null } | null })[] } }> {
+  const res = await fetch(
+    `${API_BASE_URL}/api/sessions/${sessionId}?userId=${encodeURIComponent(userId)}`
+  );
 
   if (!res.ok) {
     const errorBody = await res.json().catch(() => null);
     throw new Error(
-      errorBody?.message ||
-        "Couldn't load this session. Please try again."
+      errorBody?.message || "Couldn't load this session. Please try again."
     );
   }
 
@@ -127,16 +133,40 @@ export async function getUserSessions(userId: string): Promise<{ sessions: Sessi
 
   return res.json();
 }
+
+/**
+ * Marks a session as completed and saves the final overall score.
+ * userId is required now so the backend can confirm ownership before
+ * marking it complete.
+ */
+export async function completeSession(
+  sessionId: string,
+  overallScore: number,
+  userId: string
+): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/complete`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ overallScore, userId }),
+  });
+
+  if (!res.ok) {
+    // Not critical if this fails silently — the user's answers are already saved.
+    console.error("Failed to mark session complete.");
+  }
+}
+
 /**
  * Permanently deletes a session and all its questions/answers (cascades on
  * the backend via Prisma's onDelete: Cascade). Used by the delete button on
- * the dashboard.
+ * the dashboard. userId is required now so the backend can confirm
+ * ownership before deleting.
  */
-
-export async function deleteSession(sessionId: string): Promise<void> {
-  const res = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}`, {
-    method: "DELETE",
-  });
+export async function deleteSession(sessionId: string, userId: string): Promise<void> {
+  const res = await fetch(
+    `${API_BASE_URL}/api/sessions/${sessionId}?userId=${encodeURIComponent(userId)}`,
+    { method: "DELETE" }
+  );
 
   if (!res.ok) {
     const errorBody = await res.json().catch(() => null);
@@ -147,28 +177,12 @@ export async function deleteSession(sessionId: string): Promise<void> {
 }
 
 /**
- * Marks a session as completed and saves the final overall score.
- */
-export async function completeSession(
-  sessionId: string,
-  overallScore: number
-): Promise<void> {
-  const res = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/complete`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ overallScore }),
-  });
-
-  if (!res.ok) {
-    // Not critical if this fails silently — the user's answers are already saved.
-    console.error("Failed to mark session complete.");
-  }
-}
-
-/**
  * Submits an answer and streams the AI feedback back chunk by chunk.
  * onChunk fires every time a new piece of text arrives (for the typewriter effect).
  * Returns the full feedback text once streaming is complete.
+ *
+ * userId is required now so the backend can confirm this question's parent
+ * session actually belongs to the requesting user.
  *
  * IMPORTANT: if the backend sends an { error: "..." } message mid-stream
  * (e.g. Gemini failed partway through), that error is thrown here so it
@@ -178,19 +192,19 @@ export async function completeSession(
 export async function submitAnswerStreaming(
   questionId: string,
   answerText: string,
+  userId: string,
   onChunk: (chunk: string) => void
 ): Promise<string> {
   const res = await fetch(`${API_BASE_URL}/api/answers`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ questionId, answerText }),
+    body: JSON.stringify({ questionId, answerText, userId }),
   });
 
   if (!res.ok || !res.body) {
     const errorBody = await res.json().catch(() => null);
     throw new Error(
-      errorBody?.message ||
-        "Couldn't submit your answer. Please try again."
+      errorBody?.message || "Couldn't submit your answer. Please try again."
     );
   }
 

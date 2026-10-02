@@ -1,5 +1,13 @@
 // This file contains the actual logic for each session-related API request.
 // "Session" here means one full mock-interview attempt (one role + set of questions).
+//
+// Ownership checks: every route that reads/mutates a specific session now
+// requires a userId and confirms it matches the session's actual owner
+// before proceeding. This stops one user from viewing, completing, or
+// deleting another user's session if they ever guessed or saw its id
+// (e.g. via a shared link or browser history). Note: this trusts whatever
+// userId the frontend sends — it's not a substitute for real server-side
+// auth, but it closes the specific "wrong session id" gap.
 
 const prisma = require('../config/db');
 const aiService = require('../services/ai.service');
@@ -21,11 +29,16 @@ async function getUserSessions(req, res, next) {
   }
 }
 
-// GET /api/sessions/:id
+// GET /api/sessions/:id?userId=...
 // Returns one session including all its questions (used on the interview page)
 async function getSessionById(req, res, next) {
   try {
     const { id } = req.params;
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({ error: true, message: 'userId is required.' });
+    }
 
     const session = await prisma.interviewSession.findUnique({
       where: { id },
@@ -39,6 +52,10 @@ async function getSessionById(req, res, next) {
 
     if (!session) {
       return res.status(404).json({ error: true, message: 'Session not found.' });
+    }
+
+    if (session.userId !== userId) {
+      return res.status(403).json({ error: true, message: 'You do not have access to this session.' });
     }
 
     res.json({ session });
@@ -107,7 +124,21 @@ async function createSession(req, res, next) {
 async function completeSession(req, res, next) {
   try {
     const { id } = req.params;
-    const { overallScore } = req.body;
+    const { overallScore, userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: true, message: 'userId is required.' });
+    }
+
+    const existing = await prisma.interviewSession.findUnique({ where: { id } });
+
+    if (!existing) {
+      return res.status(404).json({ error: true, message: 'Session not found.' });
+    }
+
+    if (existing.userId !== userId) {
+      return res.status(403).json({ error: true, message: 'You do not have access to this session.' });
+    }
 
     const session = await prisma.interviewSession.update({
       where: { id },
@@ -124,10 +155,26 @@ async function completeSession(req, res, next) {
   }
 }
 
-// DELETE /api/sessions/:id
+// DELETE /api/sessions/:id?userId=...
 async function deleteSession(req, res, next) {
   try {
     const { id } = req.params;
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({ error: true, message: 'userId is required.' });
+    }
+
+    const existing = await prisma.interviewSession.findUnique({ where: { id } });
+
+    if (!existing) {
+      return res.status(404).json({ error: true, message: 'Session not found.' });
+    }
+
+    if (existing.userId !== userId) {
+      return res.status(403).json({ error: true, message: 'You do not have access to this session.' });
+    }
+
     await prisma.interviewSession.delete({ where: { id } });
     res.json({ success: true });
   } catch (err) {
