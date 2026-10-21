@@ -6,7 +6,11 @@ Practice for a job interview with an AI interviewer. Pick a role and experience 
 
 > The API runs on a free host, so the first request after a quiet period can take up to a minute. Sign-in is Google only.
 
-<!-- Add 2-3 screenshots here (docs/ folder): the home page, a question with streaming feedback, the dashboard -->
+![Home page with a sample interview session in the terminal](docs/home.png)
+
+![AI feedback and scores for an answer](docs/feedback.png)
+
+![Past sessions on the dashboard](docs/dashboard.png)
 
 ## What it does
 
