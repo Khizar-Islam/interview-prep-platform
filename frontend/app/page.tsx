@@ -60,10 +60,16 @@ export default function Home() {
       <HowItWorks />
 
       {/* Footer */}
-      <footer className="max-w-6xl mx-auto px-6 py-10 border-t border-border-soft">
+      <footer className="max-w-6xl mx-auto px-6 py-10 border-t border-border-soft flex flex-wrap items-center gap-x-6 gap-y-2">
         <p className="font-mono text-xs text-muted">
           Built by Khizar — a portfolio project.
         </p>
+        <Link
+          href="/privacy"
+          className="font-mono text-xs text-muted hover:text-foreground transition-colors"
+        >
+          Privacy
+        </Link>
       </footer>
     </main>
   );
