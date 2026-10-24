@@ -1,25 +1,24 @@
 // This file contains the actual logic for each session-related API request.
 // "Session" here means one full mock-interview attempt (one role + set of questions).
 //
-// Ownership checks: every route that reads/mutates a specific session now
-// requires a userId and confirms it matches the session's actual owner
-// before proceeding. This stops one user from viewing, completing, or
-// deleting another user's session if they ever guessed or saw its id
-// (e.g. via a shared link or browser history). Note: this trusts whatever
-// userId the frontend sends — it's not a substitute for real server-side
-// auth, but it closes the specific "wrong session id" gap.
+// Ownership: the signed-in user's id comes ONLY from req.userId, which the
+// auth middleware sets from a verified token. Every query that reads or
+// changes a specific session filters on { id, userId } together, so another
+// user's session behaves exactly like one that doesn't exist (404).
 
 const prisma = require('../config/db');
 const aiService = require('../services/ai.service');
 
-// GET /api/sessions/user/:userId
-// Returns all past interview sessions for a given user (for the dashboard/history page)
+function sessionNotFound(res) {
+  return res.status(404).json({ error: true, message: 'Session not found.' });
+}
+
+// GET /api/sessions
+// Returns all past interview sessions for the signed-in user (for the dashboard/history page)
 async function getUserSessions(req, res, next) {
   try {
-    const { userId } = req.params;
-
     const sessions = await prisma.interviewSession.findMany({
-      where: { userId },
+      where: { userId: req.userId },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -29,19 +28,14 @@ async function getUserSessions(req, res, next) {
   }
 }
 
-// GET /api/sessions/:id?userId=...
+// GET /api/sessions/:id
 // Returns one session including all its questions (used on the interview page)
 async function getSessionById(req, res, next) {
   try {
     const { id } = req.params;
-    const { userId } = req.query;
 
-    if (!userId) {
-      return res.status(400).json({ error: true, message: 'userId is required.' });
-    }
-
-    const session = await prisma.interviewSession.findUnique({
-      where: { id },
+    const session = await prisma.interviewSession.findFirst({
+      where: { id, userId: req.userId },
       include: {
         questions: {
           orderBy: { questionOrder: 'asc' },
@@ -51,11 +45,7 @@ async function getSessionById(req, res, next) {
     });
 
     if (!session) {
-      return res.status(404).json({ error: true, message: 'Session not found.' });
-    }
-
-    if (session.userId !== userId) {
-      return res.status(403).json({ error: true, message: 'You do not have access to this session.' });
+      return sessionNotFound(res);
     }
 
     res.json({ session });
@@ -73,18 +63,18 @@ async function createSession(req, res, next) {
   let session = null;
 
   try {
-    const { userId, role, experienceLevel } = req.body;
+    const { role, experienceLevel } = req.body;
 
-    if (!userId || !role || !experienceLevel) {
+    if (!role || !experienceLevel) {
       return res.status(400).json({
         error: true,
-        message: 'userId, role, and experienceLevel are all required.',
+        message: 'role and experienceLevel are both required.',
       });
     }
 
     // Step 1: create the session row first
     session = await prisma.interviewSession.create({
-      data: { userId, role, experienceLevel },
+      data: { userId: req.userId, role, experienceLevel },
     });
 
     // Step 2: ask the AI to generate questions for this role/level
@@ -124,29 +114,23 @@ async function createSession(req, res, next) {
 async function completeSession(req, res, next) {
   try {
     const { id } = req.params;
-    const { overallScore, userId } = req.body;
+    const { overallScore } = req.body;
 
-    if (!userId) {
-      return res.status(400).json({ error: true, message: 'userId is required.' });
-    }
-
-    const existing = await prisma.interviewSession.findUnique({ where: { id } });
-
-    if (!existing) {
-      return res.status(404).json({ error: true, message: 'Session not found.' });
-    }
-
-    if (existing.userId !== userId) {
-      return res.status(403).json({ error: true, message: 'You do not have access to this session.' });
-    }
-
-    const session = await prisma.interviewSession.update({
-      where: { id },
+    const { count } = await prisma.interviewSession.updateMany({
+      where: { id, userId: req.userId },
       data: {
         status: 'completed',
         overallScore,
         completedAt: new Date(),
       },
+    });
+
+    if (count === 0) {
+      return sessionNotFound(res);
+    }
+
+    const session = await prisma.interviewSession.findFirst({
+      where: { id, userId: req.userId },
     });
 
     res.json({ session });
@@ -155,27 +139,20 @@ async function completeSession(req, res, next) {
   }
 }
 
-// DELETE /api/sessions/:id?userId=...
+// DELETE /api/sessions/:id
+// Questions and answers are removed too (onDelete: Cascade in the schema).
 async function deleteSession(req, res, next) {
   try {
     const { id } = req.params;
-    const { userId } = req.query;
 
-    if (!userId) {
-      return res.status(400).json({ error: true, message: 'userId is required.' });
+    const { count } = await prisma.interviewSession.deleteMany({
+      where: { id, userId: req.userId },
+    });
+
+    if (count === 0) {
+      return sessionNotFound(res);
     }
 
-    const existing = await prisma.interviewSession.findUnique({ where: { id } });
-
-    if (!existing) {
-      return res.status(404).json({ error: true, message: 'Session not found.' });
-    }
-
-    if (existing.userId !== userId) {
-      return res.status(403).json({ error: true, message: 'You do not have access to this session.' });
-    }
-
-    await prisma.interviewSession.delete({ where: { id } });
     res.json({ success: true });
   } catch (err) {
     next(err);

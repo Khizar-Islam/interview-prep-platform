@@ -1,5 +1,5 @@
 // This file handles what happens when a user submits an answer to a question:
-// 1. Confirm the question belongs to the requesting user (via its parent session)
+// 1. Confirm the question belongs to the signed-in user (via its parent session)
 // 2. Save their answer text to the database
 // 3. Ask the AI for feedback, streaming it live to the frontend
 // 4. Once streaming finishes, save the feedback + scores to the database too
@@ -8,34 +8,26 @@ const prisma = require('../config/db');
 const aiService = require('../services/ai.service');
 
 // POST /api/answers
-// Body: { questionId, answerText, userId }
+// Body: { questionId, answerText }. The user comes from req.userId (verified token).
 async function submitAnswer(req, res, next) {
   try {
-    const { questionId, answerText, userId } = req.body;
+    const { questionId, answerText } = req.body;
 
-    if (!questionId || !answerText || !userId) {
+    if (typeof questionId !== 'string' || !questionId || !answerText) {
       return res.status(400).json({
         error: true,
-        message: 'questionId, answerText, and userId are all required.',
+        message: 'questionId and answerText are both required.',
       });
     }
 
-    // Look up the question AND its parent session, so we have the question's
-    // text for the AI, and the session's real owner for the ownership check.
-    const question = await prisma.question.findUnique({
-      where: { id: questionId },
-      include: { session: true },
+    // Only finds the question if its parent session belongs to the signed-in
+    // user. Someone else's question looks exactly like a missing one (404).
+    const question = await prisma.question.findFirst({
+      where: { id: questionId, session: { userId: req.userId } },
     });
 
     if (!question) {
       return res.status(404).json({ error: true, message: 'Question not found.' });
-    }
-
-    if (question.session.userId !== userId) {
-      return res.status(403).json({
-        error: true,
-        message: 'You do not have access to this question.',
-      });
     }
 
     // Save the answer text immediately (feedback fields stay empty for now)
