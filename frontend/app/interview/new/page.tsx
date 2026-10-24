@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession, signIn } from "next-auth/react";
 import { motion } from "framer-motion";
-import { createSession } from "@/lib/api";
+import { createSession, isSignedOutError } from "@/lib/api";
 
 const EXPERIENCE_LEVELS = [
   { value: "junior", label: "Junior (0–2 yrs)" },
@@ -24,7 +24,7 @@ const ROLE_SUGGESTIONS = [
 
 export default function NewInterviewPage() {
   const router = useRouter();
-  const { data: session, status } = useSession();
+  const { status } = useSession();
   const [role, setRole] = useState("");
   const [experienceLevel, setExperienceLevel] = useState("junior");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -37,7 +37,7 @@ export default function NewInterviewPage() {
       setError("Please enter a role.");
       return;
     }
-    if (!session?.user?.id) {
+    if (status !== "authenticated") {
       setError("Please sign in first.");
       return;
     }
@@ -47,13 +47,14 @@ export default function NewInterviewPage() {
 
     try {
       const { session: newSession } = await createSession(
-        session.user.id,
         role.trim(),
         experienceLevel,
         (elapsedSeconds) => setWakingUpSeconds(elapsedSeconds)
       );
       router.push(`/interview/${newSession.id}`);
     } catch (err) {
+      // Signed out: we're already being sent to sign in, keep the button busy.
+      if (isSignedOutError(err)) return;
       setError(
         err instanceof Error
           ? err.message

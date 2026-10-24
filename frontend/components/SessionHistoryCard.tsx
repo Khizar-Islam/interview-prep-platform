@@ -6,7 +6,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { Session, deleteSession } from "@/lib/api";
+import { Session, deleteSession, isSignedOutError } from "@/lib/api";
 
 type ConfirmState = "idle" | "confirming" | "deleting" | "error";
 
@@ -28,12 +28,13 @@ export default function SessionHistoryCard({
     setDeleteError("");
 
     try {
-      // session.userId is already available on the Session object itself —
-      // no need to look up the logged-in user separately here. The backend
-      // will still reject this if it somehow doesn't match the real owner.
-      await deleteSession(session.id, session.userId);
+      // The backend works out who's signed in from the token and only
+      // deletes the session if it belongs to them.
+      await deleteSession(session.id);
       onDeleted(session.id); // tells the dashboard to remove this card from the list
     } catch (err) {
+      // Signed out: we're already being sent to sign in, keep showing "Deleting...".
+      if (isSignedOutError(err)) return;
       setDeleteError(
         err instanceof Error ? err.message : "Something went wrong."
       );

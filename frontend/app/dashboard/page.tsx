@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSession, signIn } from "next-auth/react";
-import { getUserSessions, Session } from "@/lib/api";
+import { getUserSessions, isSignedOutError, Session } from "@/lib/api";
 import SessionHistoryCard from "@/components/SessionHistoryCard";
 
 type LoadState = "loading" | "ready" | "error";
@@ -26,20 +26,22 @@ function SessionCardSkeleton() {
 }
 
 export default function DashboardPage() {
-  const { data: authSession, status } = useSession();
+  const { status } = useSession();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (status !== "authenticated" || !authSession?.user?.id) return;
+    if (status !== "authenticated") return;
 
     async function load() {
       try {
-        const { sessions } = await getUserSessions(authSession!.user!.id);
+        const { sessions } = await getUserSessions();
         setSessions(sessions);
         setLoadState("ready");
       } catch (err) {
+        // Signed out: we're already being sent to sign in, keep the skeletons up.
+        if (isSignedOutError(err)) return;
         setError(
           err instanceof Error ? err.message : "Could not load your sessions."
         );
@@ -47,7 +49,7 @@ export default function DashboardPage() {
       }
     }
     load();
-  }, [status, authSession]);
+  }, [status]);
 
   // Called by a SessionHistoryCard once it has successfully deleted itself
   // on the backend — removes that session from local state so the card

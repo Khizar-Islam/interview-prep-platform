@@ -4,7 +4,13 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession, signIn } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
-import { getSession, submitAnswerStreaming, completeSession, Question } from "@/lib/api";
+import {
+  getSession,
+  submitAnswerStreaming,
+  completeSession,
+  isSignedOutError,
+  Question,
+} from "@/lib/api";
 
 type LoadState = "loading" | "ready" | "error";
 type AnswerState = "idle" | "submitting" | "streaming" | "done";
@@ -27,7 +33,7 @@ export default function InterviewSessionPage() {
   const router = useRouter();
   const sessionId = params.sessionId as string;
 
-  const { data: authSession, status } = useSession();
+  const { status } = useSession();
 
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [loadError, setLoadError] = useState("");
@@ -42,15 +48,14 @@ export default function InterviewSessionPage() {
   const [collectedScores, setCollectedScores] = useState<number[]>([]);
   const [isCompleting, setIsCompleting] = useState(false);
 
-  // Load the session and its questions on mount — waits until we actually
-  // know who's logged in, since getSession now requires a userId for the
-  // backend's ownership check.
+  // Load the session and its questions on mount — waits until we know the
+  // user is signed in, since the backend only returns their own sessions.
   useEffect(() => {
-    if (status !== "authenticated" || !authSession?.user?.id) return;
+    if (status !== "authenticated") return;
 
     async function load() {
       try {
-        const { session } = await getSession(sessionId, authSession!.user!.id);
+        const { session } = await getSession(sessionId);
         setQuestions(session.questions);
         setRole(session.role);
 
@@ -67,6 +72,8 @@ export default function InterviewSessionPage() {
 
         setLoadState("ready");
       } catch (err) {
+        // Signed out: we're already being sent to sign in, keep the loading screen.
+        if (isSignedOutError(err)) return;
         setLoadError(
           err instanceof Error ? err.message : "Could not load this session."
         );
@@ -74,13 +81,13 @@ export default function InterviewSessionPage() {
       }
     }
     load();
-  }, [sessionId, status, authSession]);
+  }, [sessionId, status]);
 
   const currentQuestion = questions[currentIndex];
   const isLastQuestion = currentIndex === questions.length - 1;
 
   async function handleSubmitAnswer() {
-    if (!answerText.trim() || !currentQuestion || !authSession?.user?.id) return;
+    if (!answerText.trim() || !currentQuestion || status !== "authenticated") return;
 
     setAnswerState("submitting");
     setFeedback("");
@@ -91,7 +98,6 @@ export default function InterviewSessionPage() {
       const fullText = await submitAnswerStreaming(
         currentQuestion.id,
         answerText,
-        authSession.user.id,
         (chunk) => {
           setFeedback((prev) => prev + chunk);
         }
@@ -104,6 +110,9 @@ export default function InterviewSessionPage() {
       }
       setAnswerState("done");
     } catch (err) {
+      // Signed out: we're already being sent to sign in. Their typed answer
+      // stays in the box until the page navigates away.
+      if (isSignedOutError(err)) return;
       setSubmitError(
         err instanceof Error ? err.message : "Something went wrong."
       );
@@ -112,13 +121,13 @@ export default function InterviewSessionPage() {
   }
 
   async function handleNextQuestion() {
-    if (isLastQuestion && authSession?.user?.id) {
+    if (isLastQuestion && status === "authenticated") {
       setIsCompleting(true);
       const overallAverage =
         collectedScores.length > 0
           ? collectedScores.reduce((a, b) => a + b, 0) / collectedScores.length
           : 0;
-      await completeSession(sessionId, overallAverage, authSession.user.id);
+      await completeSession(sessionId, overallAverage);
     }
     setCurrentIndex((prev) => prev + 1);
     setAnswerText("");
