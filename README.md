@@ -24,7 +24,7 @@ Practice for a job interview with an AI interviewer. Pick a role and experience 
 - **Signed API requests.** The web app signs a 5-minute token for the signed-in user (`GET /api/api-token`) and sends it as `Authorization: Bearer <token>`. The API verifies it (HS256, issuer and audience pinned, expiry) and takes the user id only from the token.
 - **Ownership inside the query.** Every session, question and answer query is filtered by the signed-in user, so one user can never read or change another user's sessions. Another user's session returns 404, the same as a missing one.
 - **Rate limits.** Creating sessions and submitting answers are limited per signed-in user, since each call uses the Gemini quota.
-- **No raw errors to the browser.** Failures are logged on the server and the user sees a friendly message.
+- **No raw errors to the browser.** Unexpected failures are logged on the server and the browser only gets a short, fixed message.
 - **Defensive JSON parsing.** Code fences are stripped from the model's output before parsing.
 - **Cold start handling.** The first request retries once with a "waking up the database" message when the free database is asleep.
 - **Auth model names.** The interview model is called `InterviewSession` (mapped to the `sessions` table) so it doesn't clash with NextAuth's `Session`.

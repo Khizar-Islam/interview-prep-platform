@@ -99,6 +99,7 @@ const aiService = require('../src/services/ai.service');
 const { loadConfig } = require('../src/config/env');
 const { createApp } = require('../src/app');
 const { TOKEN_ISSUER, TOKEN_AUDIENCE } = require('../src/middleware/auth');
+const errorHandler = require('../src/middleware/errorHandler');
 
 // If any test path ever reached Gemini, fail loudly instead of spending quota.
 for (const name of Object.keys(aiService)) {
@@ -137,7 +138,87 @@ async function signToken(sub, overrides = {}) {
     .sign(overrides.key || secretKey);
 }
 
+// Calls errorHandler directly with fake req/res objects (no test-only route).
+function checkErrorHandler() {
+  const GENERIC = 'Something went wrong on the server.';
+  const DB_TEXT = "Can't reach database"; // frontend/lib/api.ts retries on this exact text
+
+  function run(err, { headersSent = false } = {}) {
+    const res = {
+      headersSent,
+      statusCode: null,
+      body: undefined,
+      sent: false,
+      status(code) {
+        this.statusCode = code;
+        return this;
+      },
+      json(body) {
+        this.body = body;
+        this.sent = true;
+        return this;
+      },
+    };
+    let nextArg;
+    let nextCalled = false;
+    const next = (arg) => {
+      nextCalled = true;
+      nextArg = arg;
+    };
+
+    // The handler logs the real error; keep the fake secrets out of the test output.
+    const originalConsoleError = console.error;
+    console.error = () => {};
+    try {
+      errorHandler(err, {}, res, next);
+    } finally {
+      console.error = originalConsoleError;
+    }
+    return { res, nextCalled, nextArg, text: JSON.stringify(res.body ?? '') };
+  }
+
+  console.log('\nError handler (called directly)');
+
+  const secret = 'SECRET-db-password-hunter2 at ep-secret-host.neon.tech';
+  const a = run(new Error(secret));
+  check('a) plain Error -> 500 with the generic message', a.res.statusCode === 500 && a.res.body?.message === GENERIC && a.res.body?.error === true, `got ${a.res.statusCode}`);
+  check('a) ...secret text not in the response', !a.text.includes('SECRET') && !a.text.includes('ep-secret-host'));
+
+  const initError = new Error("Can't reach database server at `ep-secret-host.neon.tech:5432`");
+  initError.name = 'PrismaClientInitializationError';
+  const b = run(initError);
+  check('b) PrismaClientInitializationError -> 503', b.res.statusCode === 503 && b.res.body?.error === true, `got ${b.res.statusCode}`);
+  check(`b) ...message contains "${DB_TEXT}"`, typeof b.res.body?.message === 'string' && b.res.body.message.includes(DB_TEXT));
+  check('b) ...database host not in the response', !b.text.includes('ep-secret-host'));
+
+  const poolTimeout = new Error('Timed out fetching a new connection from the connection pool. SECRET');
+  poolTimeout.code = 'P2024';
+  const c = run(poolTimeout);
+  check('c) code P2024 -> same 503', c.res.statusCode === 503 && c.res.body?.message === b.res.body?.message && !c.text.includes('SECRET'), `got ${c.res.statusCode}`);
+
+  const badRequest = new Error('Expected double-quoted property name in JSON at position 13');
+  badRequest.statusCode = 400;
+  const d = run(badRequest);
+  check('d) statusCode 400 keeps its status and message', d.res.statusCode === 400 && d.res.body?.message === badRequest.message, `got ${d.res.statusCode}`);
+
+  const lateError = new Error('saving feedback failed after the stream ended');
+  const e = run(lateError, { headersSent: true });
+  check('e) headersSent -> nothing sent, next(err) called', !e.res.sent && e.res.statusCode === null && e.nextCalled && e.nextArg === lateError);
+
+  const googleError = new Error('Google says: API key not valid. SECRET-google-detail');
+  googleError.status = 401; // like a Gemini library error: Google's status, no statusCode
+  const f = run(googleError);
+  check('f) "status" 401 without statusCode -> generic 500, not 401', f.res.statusCode === 500 && f.res.body?.message === GENERIC, `got ${f.res.statusCode}`);
+  check('f) ...Google message not in the response', !f.text.includes('Google says') && !f.text.includes('SECRET'));
+
+  // Drift guard: the frontend's retry text must still match what the API sends.
+  const frontendApi = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'frontend', 'lib', 'api.ts'), 'utf8');
+  check(`503 text "${DB_TEXT}" is still what frontend/lib/api.ts retries on`, frontendApi.includes(`message.includes("${DB_TEXT}")`));
+}
+
 async function main() {
+  checkErrorHandler();
+
   const server = createApp(config).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
