@@ -3,6 +3,25 @@
 // server refuses to start instead of running with auth or CORS half-configured.
 
 const MIN_SECRET_LENGTH = 32;
+const DEFAULT_TRUST_PROXY_HOPS = 1;
+const MAX_TRUST_PROXY_HOPS = 5;
+
+// Number of proxies in front of the API in production. The right number
+// depends on the host and is measured there, not assumed.
+// Must be a whole number from 1 to 5; anything else falls back to 1.
+function parseTrustProxyHops(raw) {
+  if (raw === undefined || raw.trim() === '') return DEFAULT_TRUST_PROXY_HOPS;
+
+  const value = raw.trim();
+  const hops = Number(value);
+  if (!/^\d+$/.test(value) || hops < 1 || hops > MAX_TRUST_PROXY_HOPS) {
+    console.warn(
+      `TRUST_PROXY_HOPS="${raw}" is not a whole number from 1 to ${MAX_TRUST_PROXY_HOPS}. Using ${DEFAULT_TRUST_PROXY_HOPS}.`
+    );
+    return DEFAULT_TRUST_PROXY_HOPS;
+  }
+  return hops;
+}
 
 function loadConfig() {
   const apiAuthSecret = process.env.API_AUTH_SECRET;
@@ -30,7 +49,8 @@ function loadConfig() {
     // Render (and most hosts) put a proxy in front of the app, so the real
     // visitor IP is in X-Forwarded-For. Without this, everyone shares one IP.
     trustProxy: process.env.NODE_ENV === 'production' || Boolean(process.env.RENDER),
+    trustProxyHops: parseTrustProxyHops(process.env.TRUST_PROXY_HOPS),
   };
 }
 
-module.exports = { loadConfig };
+module.exports = { loadConfig, parseTrustProxyHops };

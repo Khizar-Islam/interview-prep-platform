@@ -77,6 +77,7 @@ Both folders have a `.env.example` listing these variables.
 | `API_AUTH_SECRET` | both | Signs (web) and verifies (API) the sign-in tokens |
 | `FRONTEND_ORIGIN` | backend | Web app URLs allowed by CORS, comma-separated, no trailing slash |
 | `PORT` | backend | API port, default 5000 |
+| `TRUST_PROXY_HOPS` | backend | Number of proxies in front of the API in production, 1 to 5, default 1 |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | frontend | Google sign-in |
 | `AUTH_SECRET` | frontend | NextAuth secret (`NEXTAUTH_SECRET` also works) |
 | `NEXT_PUBLIC_API_URL` | frontend | API URL |
