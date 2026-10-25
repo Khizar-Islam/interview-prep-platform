@@ -23,7 +23,7 @@ Practice for a job interview with an AI interviewer. Pick a role and experience 
 - **Streaming over SSE.** Feedback is sent as server-sent events from Express, so the text appears as the model writes it.
 - **Signed API requests.** The web app signs a 5-minute token for the signed-in user (`GET /api/api-token`) and sends it as `Authorization: Bearer <token>`. The API verifies it (HS256, issuer and audience pinned, expiry) and takes the user id only from the token.
 - **Ownership inside the query.** Every session, question and answer query is filtered by the signed-in user, so one user can never read or change another user's sessions. Another user's session returns 404, the same as a missing one.
-- **Rate limits.** Creating sessions and submitting answers are limited per signed-in user, since each call uses the Gemini quota.
+- **Rate limits.** Creating sessions and submitting answers are limited per signed-in user and per IP address (hourly and daily), since each call uses the Gemini quota and one person could otherwise make many accounts. All API routes also have a loose per-IP cap.
 - **No raw errors to the browser.** Unexpected failures are logged on the server and the browser only gets a short, fixed message.
 - **Defensive JSON parsing.** Code fences are stripped from the model's output before parsing.
 - **Cold start handling.** The first request retries once with a "waking up the database" message when the free database is asleep.
@@ -77,7 +77,7 @@ Both folders have a `.env.example` listing these variables.
 | `API_AUTH_SECRET` | both | Signs (web) and verifies (API) the sign-in tokens |
 | `FRONTEND_ORIGIN` | backend | Web app URLs allowed by CORS, comma-separated, no trailing slash |
 | `PORT` | backend | API port, default 5000 |
-| `TRUST_PROXY_HOPS` | backend | Number of proxies in front of the API in production, 1 to 5, default 1 |
+| `TRUST_PROXY_HOPS` | backend | Number of proxies in front of the API in production, 1 to 5, default 1. On Render it must be 3 (measured: visitor, Cloudflare, Render proxy); a wrong value makes every visitor share one IP counter |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | frontend | Google sign-in |
 | `AUTH_SECRET` | frontend | NextAuth secret (`NEXTAUTH_SECRET` also works) |
 | `NEXT_PUBLIC_API_URL` | frontend | API URL |
@@ -85,6 +85,8 @@ Both folders have a `.env.example` listing these variables.
 `API_AUTH_SECRET` must be the same on both sides, at least 32 characters, different from the NextAuth secret, and never prefixed with `NEXT_PUBLIC_`. The API won't start without it or `FRONTEND_ORIGIN`. To generate one: `node -e "console.log(require('crypto').randomBytes(36).toString('base64url'))"`
 
 To run the auth tests, create a separate database branch (Neon: Branches, Create branch from your default branch), set it as `TEST_DATABASE_URL` in `backend/.env`, and run `npm run test:auth` in `backend/`. They check that missing or bad tokens get 401 and that one user can't read, change, delete or answer in another user's session. The script refuses to run if `TEST_DATABASE_URL` is the same as `DATABASE_URL` or on the same host.
+
+`npm run test:config` and `npm run test:ratelimit` in `backend/` need no database and never call Gemini.
 
 ## Deploying
 

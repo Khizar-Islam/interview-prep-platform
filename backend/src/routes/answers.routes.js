@@ -1,10 +1,19 @@
 // Defines the URL for submitting an answer.
 
 const express = require('express');
-const router = express.Router();
 const answersController = require('../controllers/answers.controller');
-const { submitAnswerLimiter } = require('../middleware/rateLimiter');
 
-router.post('/', submitAnswerLimiter, answersController.submitAnswer);
+// Built inside createApp with that app's rate limiters (see middleware/rateLimiter.js).
+// Per-user cap first, then per-IP caps.
+function createAnswersRouter(limiters) {
+  const router = express.Router();
+  router.post(
+    '/',
+    limiters.submitAnswerLimiter,
+    limiters.submitAnswerIpLimiters,
+    answersController.submitAnswer
+  );
+  return router;
+}
 
-module.exports = router;
+module.exports = createAnswersRouter;

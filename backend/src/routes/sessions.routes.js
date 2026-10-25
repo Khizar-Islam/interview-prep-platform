@@ -3,14 +3,26 @@
 // Every route here requires sign-in (see app.js); the user comes from req.userId.
 
 const express = require('express');
-const router = express.Router();
 const sessionsController = require('../controllers/sessions.controller');
-const { createSessionLimiter } = require('../middleware/rateLimiter');
 
-router.get('/', sessionsController.getUserSessions);
-router.get('/:id', sessionsController.getSessionById);
-router.post('/', createSessionLimiter, sessionsController.createSession);
-router.patch('/:id/complete', sessionsController.completeSession);
-router.delete('/:id', sessionsController.deleteSession);
+// Built inside createApp with that app's rate limiters (see middleware/rateLimiter.js).
+function createSessionsRouter(limiters) {
+  const router = express.Router();
 
-module.exports = router;
+  router.get('/', sessionsController.getUserSessions);
+  router.get('/:id', sessionsController.getSessionById);
+  // Per-user cap first, then per-IP caps, so one user hammering past their
+  // own cap doesn't use up the network's shared budget.
+  router.post(
+    '/',
+    limiters.createSessionLimiter,
+    limiters.createSessionIpLimiters,
+    sessionsController.createSession
+  );
+  router.patch('/:id/complete', sessionsController.completeSession);
+  router.delete('/:id', sessionsController.deleteSession);
+
+  return router;
+}
+
+module.exports = createSessionsRouter;
