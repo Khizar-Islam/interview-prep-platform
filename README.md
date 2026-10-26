@@ -26,7 +26,7 @@ Practice for a job interview with an AI interviewer. Pick a role and experience 
 - **Rate limits.** Creating sessions and submitting answers are limited per signed-in user and per IP address (hourly and daily), since each call uses the Gemini quota and one person could otherwise make many accounts. All API routes also have a loose per-IP cap.
 - **No raw errors to the browser.** Unexpected failures are logged on the server and the browser only gets a short, fixed message.
 - **Defensive JSON parsing.** Code fences are stripped from the model's output before parsing.
-- **Cold start handling.** The first request retries once with a "waking up the database" message when the free database is asleep.
+- **Cold start handling.** The free API host sleeps when idle. If creating an interview session takes longer than 3 seconds, the button shows a "Waking up the server..." seconds counter until it responds. If the free database is also asleep, the request retries once automatically.
 - **Auth model names.** The interview model is called `InterviewSession` (mapped to the `sessions` table) so it doesn't clash with NextAuth's `Session`.
 
 ## Tech stack
