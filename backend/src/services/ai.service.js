@@ -18,6 +18,96 @@ function getModel() {
   return (process.env.GEMINI_MODEL || '').trim() || DEFAULT_MODEL;
 }
 
+// Tried once when the main model is overloaded, out of quota or times out. Set
+// GEMINI_FALLBACK_MODEL to override it; unset, empty or blank uses the default.
+const DEFAULT_FALLBACK_MODEL = 'gemini-3.5-flash-lite';
+
+function getFallbackModel() {
+  return (process.env.GEMINI_FALLBACK_MODEL || '').trim() || DEFAULT_FALLBACK_MODEL;
+}
+
+const RETRY_DELAY_MS = 2000;
+// Per attempt. Three attempts plus the retry wait (77 s at most) stay under
+// Cloudflare's 100 s limit in front of Render. For streaming this only covers
+// the wait for the first chunk, so a long answer is never cut off.
+const ATTEMPT_TIMEOUT_MS = 25000;
+
+// Node's own fetch timeouts, which can arrive before ours does.
+const NETWORK_TIMEOUT_CODES = new Set([
+  'ETIMEDOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_CONNECT_TIMEOUT',
+]);
+
+// What went wrong, as used in the log line: 'timeout', Google's HTTP status
+// (503, 429, 400...), or 'error' for anything else (e.g. a network failure).
+function failureKind(err, signal) {
+  if (signal.aborted) return 'timeout';
+  const code = err.code || (err.cause && err.cause.code);
+  if (NETWORK_TIMEOUT_CODES.has(code)) return 'timeout';
+  return typeof err.status === 'number' ? err.status : 'error';
+}
+
+function logAttempt(model, attempt, outcome, startedAt) {
+  console.log(`[gemini] ${model} attempt ${attempt}: ${outcome} in ${Date.now() - startedAt}ms`);
+}
+
+/**
+ * Runs one Gemini request, retrying temporary failures:
+ *   503 or timeout: wait 2 s, try the main model again, then the fallback.
+ *   429 (quota): skip the retry and go straight to the fallback.
+ *   anything else: throw at once, as before.
+ *
+ * run(model, signal, gotResponse) makes the actual call. It must pass signal
+ * to the SDK, and may call gotResponse() to stop the timeout early (streaming
+ * does this on the first chunk). canRetry() returning false (text already sent
+ * to the client) makes any failure final.
+ */
+async function withRetries(run, canRetry = () => true) {
+  const mainModel = getModel();
+  const fallbackModel = getFallbackModel();
+  let attempt = 0;
+
+  async function tryModel(model) {
+    attempt += 1;
+    const startedAt = Date.now();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ATTEMPT_TIMEOUT_MS);
+    try {
+      const value = await run(model, controller.signal, () => clearTimeout(timer));
+      logAttempt(model, attempt, 'ok', startedAt);
+      return { ok: true, value };
+    } catch (err) {
+      const kind = failureKind(err, controller.signal);
+      const outcome = canRetry() ? kind : `${kind} after streaming started`;
+      logAttempt(model, attempt, outcome, startedAt);
+      return { ok: false, err, kind };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  let result = await tryModel(mainModel);
+  if (result.ok) return result.value;
+
+  const isTemporary = (kind) => kind === 503 || kind === 429 || kind === 'timeout';
+  if (!canRetry() || !isTemporary(result.kind)) throw result.err;
+
+  if (result.kind !== 429) {
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+    result = await tryModel(mainModel);
+    if (result.ok) return result.value;
+    if (!canRetry() || !isTemporary(result.kind)) throw result.err;
+  }
+
+  // Same model as the main one: it has just failed, don't call it again.
+  if (fallbackModel === mainModel) throw result.err;
+
+  result = await tryModel(fallbackModel);
+  if (result.ok) return result.value;
+  throw result.err;
+}
+
 /**
  * Generates 5 interview questions for a given role and experience level.
  * Returns an array like:
@@ -26,10 +116,13 @@ function getModel() {
 async function generateQuestions(role, experienceLevel) {
   const prompt = `You are a senior technical interviewer. Generate exactly 5 interview questions for a ${experienceLevel} ${role} candidate. Mix 2 behavioral, 2 technical, and 1 system-design question (if the role doesn't fit system design, replace it with a third technical question). Respond with ONLY a valid JSON array, no other text, no markdown formatting, no code fences. Format: [{"questionText": "...", "category": "behavioral"}, {"questionText": "...", "category": "technical"}]`;
 
-  const response = await ai.models.generateContent({
-    model: getModel(),
-    contents: prompt,
-  });
+  const response = await withRetries((model, signal) =>
+    ai.models.generateContent({
+      model,
+      contents: prompt,
+      config: { abortSignal: signal },
+    })
+  );
 
   const rawText = response.text;
 
@@ -62,19 +155,30 @@ async function streamFeedback(questionText, answerText, res) {
   res.setHeader('Connection', 'keep-alive');
 
   let fullText = '';
+  // Once any text reaches the client, a failure is final: retrying would
+  // send duplicated or mixed text.
+  let textSent = false;
 
   try {
-    const streamResult = await ai.models.generateContentStream({
-      model: getModel(),
-      contents: prompt,
-    });
+    await withRetries(
+      async (model, signal, gotResponse) => {
+        const streamResult = await ai.models.generateContentStream({
+          model,
+          contents: prompt,
+          config: { abortSignal: signal },
+        });
 
-    // Gemini's stream yields chunks one at a time; each chunk has .text
-    for await (const chunk of streamResult) {
-      const textChunk = chunk.text || '';
-      fullText += textChunk;
-      res.write(`data: ${JSON.stringify({ chunk: textChunk })}\n\n`);
-    }
+        // Gemini's stream yields chunks one at a time; each chunk has .text
+        for await (const chunk of streamResult) {
+          gotResponse();
+          const textChunk = chunk.text || '';
+          fullText += textChunk;
+          if (textChunk) textSent = true;
+          res.write(`data: ${JSON.stringify({ chunk: textChunk })}\n\n`);
+        }
+      },
+      () => !textSent
+    );
 
         res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
     res.end();

@@ -11,6 +11,7 @@
     "test:config": "node scripts/config-test.js",
     "test:ratelimit": "node scripts/rate-limit-test.js",
     "test:model": "node scripts/model-test.js",
+    "test:retry": "node scripts/retry-test.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev --name init",
     "prisma:studio": "prisma studio"
