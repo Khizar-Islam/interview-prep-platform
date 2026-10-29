@@ -6,9 +6,17 @@ const { GoogleGenAI } = require('@google/genai');
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-// gemini-2.5-flash is on Google's free tier and is fast/cheap enough
-// for both question generation and feedback.
-const MODEL = 'gemini-3.5-flash';
+// One model for both question generation and feedback. Set GEMINI_MODEL to
+// override it; unset, empty or blank uses the default. gemini-3.6-flash is
+// Google's stable previous-generation Flash model; the newest one gave
+// "high demand" 503 errors on the free tier elsewhere.
+const DEFAULT_MODEL = 'gemini-3.6-flash';
+
+// Read on every call (not once at load) so it doesn't depend on when
+// dotenv runs, and so the test can change it between calls.
+function getModel() {
+  return (process.env.GEMINI_MODEL || '').trim() || DEFAULT_MODEL;
+}
 
 /**
  * Generates 5 interview questions for a given role and experience level.
@@ -19,7 +27,7 @@ async function generateQuestions(role, experienceLevel) {
   const prompt = `You are a senior technical interviewer. Generate exactly 5 interview questions for a ${experienceLevel} ${role} candidate. Mix 2 behavioral, 2 technical, and 1 system-design question (if the role doesn't fit system design, replace it with a third technical question). Respond with ONLY a valid JSON array, no other text, no markdown formatting, no code fences. Format: [{"questionText": "...", "category": "behavioral"}, {"questionText": "...", "category": "technical"}]`;
 
   const response = await ai.models.generateContent({
-    model: MODEL,
+    model: getModel(),
     contents: prompt,
   });
 
@@ -57,7 +65,7 @@ async function streamFeedback(questionText, answerText, res) {
 
   try {
     const streamResult = await ai.models.generateContentStream({
-      model: MODEL,
+      model: getModel(),
       contents: prompt,
     });
 

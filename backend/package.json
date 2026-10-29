@@ -10,6 +10,7 @@
     "test:auth": "node scripts/auth-test.js",
     "test:config": "node scripts/config-test.js",
     "test:ratelimit": "node scripts/rate-limit-test.js",
+    "test:model": "node scripts/model-test.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev --name init",
     "prisma:studio": "prisma studio"

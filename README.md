@@ -74,6 +74,7 @@ Both folders have a `.env.example` listing these variables.
 |---|---|---|
 | `DATABASE_URL` | both | Postgres connection string |
 | `GEMINI_API_KEY` | backend | Gemini API key |
+| `GEMINI_MODEL` | backend | Optional. Gemini model for questions and feedback, default `gemini-3.6-flash`. Empty or blank uses the default |
 | `API_AUTH_SECRET` | both | Signs (web) and verifies (API) the sign-in tokens |
 | `FRONTEND_ORIGIN` | backend | Web app URLs allowed by CORS, comma-separated, no trailing slash |
 | `PORT` | backend | API port, default 5000 |
@@ -86,7 +87,7 @@ Both folders have a `.env.example` listing these variables.
 
 To run the auth tests, create a separate database branch (Neon: Branches, Create branch from your default branch), set it as `TEST_DATABASE_URL` in `backend/.env`, and run `npm run test:auth` in `backend/`. They check that missing or bad tokens get 401 and that one user can't read, change, delete or answer in another user's session. The script refuses to run if `TEST_DATABASE_URL` is the same as `DATABASE_URL` or on the same host.
 
-`npm run test:config` and `npm run test:ratelimit` in `backend/` need no database and never call Gemini.
+`npm run test:config`, `npm run test:ratelimit` and `npm run test:model` in `backend/` need no database and never call Gemini.
 
 ## Deploying
 
